@@ -581,6 +581,8 @@ class BasicLSTMCell(LayerRNNCell):
     # Inputs must be 2-dimensional.
     self.input_spec = base_layer.InputSpec(ndim=2)
 
+    # num_units meant hidden W_{f}, W_{i}, W_{c} and W_{o} one dimension
+    # another dimension is word embedding size?
     self._num_units = num_units
     self._forget_bias = forget_bias
     self._state_is_tuple = state_is_tuple
@@ -600,11 +602,15 @@ class BasicLSTMCell(LayerRNNCell):
       raise ValueError("Expected inputs.shape[-1] to be known, saw shape: %s"
                        % inputs_shape)
 
+    # input_depth meant x_{i} input in a sentence, commonly it is word embedding
     input_depth = inputs_shape[1].value
+    # h_depth meant h_{i-1}, previous state's output 2nd dimension, equal with num_units
     h_depth = self._num_units
+    # self._kernel meant [W_{f}, W_{i}, W_{n}, W_{o}], weight concat
     self._kernel = self.add_variable(
         _WEIGHTS_VARIABLE_NAME,
         shape=[input_depth + h_depth, 4 * self._num_units])
+    # self._bias meant [b_{f}, b_{i}, b_{n}, b_{o}], bias concat
     self._bias = self.add_variable(
         _BIAS_VARIABLE_NAME,
         shape=[4 * self._num_units],
@@ -631,10 +637,12 @@ class BasicLSTMCell(LayerRNNCell):
     one = constant_op.constant(1, dtype=dtypes.int32)
     # Parameters of gates are concatenated into one multiply for efficiency.
     if self._state_is_tuple:
-      c, h = state
+      c, h = state    # c meant c_{t-1}, h meant h_{t-1}, below are the same
     else:
       c, h = array_ops.split(value=state, num_or_size_splits=2, axis=one)
 
+    # inputs shape is [batch_size, word embedding size]
+    # h meant h_{t-1}, which represents previous output state, h shape is [batch_size, ***]
     gate_inputs = math_ops.matmul(
         array_ops.concat([inputs, h], 1), self._kernel)
     gate_inputs = nn_ops.bias_add(gate_inputs, self._bias)
@@ -648,14 +656,20 @@ class BasicLSTMCell(LayerRNNCell):
     # performance improvement. So using those at the cost of readability.
     add = math_ops.add
     multiply = math_ops.multiply
+    # sigmoid(add(f, forget_bias_tensor): calculate forget gate
+    # sigmoid(i): calculate input gate
+    # multiply(c, sigmoid(add(f, forget_bias_tensor))): f_{t} * c_{t-1}
+    # multiply(sigmoid(i), self._activation(j)): i_{t} * \tilde{c}_{t}
+    # new_c: c_{t}
     new_c = add(multiply(c, sigmoid(add(f, forget_bias_tensor))),
                 multiply(sigmoid(i), self._activation(j)))
+    # h_{t} = tanh(c_{t}) * o_{t}
     new_h = multiply(self._activation(new_c), sigmoid(o))
 
     if self._state_is_tuple:
-      new_state = LSTMStateTuple(new_c, new_h)
+      new_state = LSTMStateTuple(new_c, new_h)    # tuple of (c,h)
     else:
-      new_state = array_ops.concat([new_c, new_h], 1)
+      new_state = array_ops.concat([new_c, new_h], 1)    # concat of [c,h]
     return new_h, new_state
 
 
